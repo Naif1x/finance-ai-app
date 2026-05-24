@@ -89,10 +89,23 @@ def call_claude(prompt: str, client: anthropic.Anthropic) -> dict:
     text = "".join(block.text for block in response.content if block.type == "text")
     clean = text.replace("```json", "").replace("```", "").strip()
 
+    # Fix common JSON issues from LLMs
+    import re
+    clean = re.sub(r',\s*}', '}', clean)
+    clean = re.sub(r',\s*]', ']', clean)
+
+    # If JSON is truncated, try to close it
+    if not clean.endswith('}'):
+        open_braces = clean.count('{') - clean.count('}')
+        open_brackets = clean.count('[') - clean.count(']')
+        clean = clean.rstrip(',\n ')
+        clean += ']' * open_brackets
+        clean += '}' * open_braces
+
     try:
         return json.loads(clean)
     except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e}\nRaw: {clean[:500]}")
+        logger.error(f"JSON parse error: {e}\nRaw: {clean[:1000]}")
         raise HTTPException(500, f"Claude returned invalid JSON: {str(e)}")
 
 
