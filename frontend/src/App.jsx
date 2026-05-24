@@ -1,15 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import Papa from "papaparse";
 
-/* ── The key difference from the prototype: ──────────────────────
-   Instead of calling Claude's API directly from the browser,
-   this sends files + params to YOUR backend at /api/analyze,
-   which securely proxies to Claude with the API key server-side.
-   ─────────────────────────────────────────────────────────────── */
-
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
-// ── Theme ──────────────────────────────────────────────────────
 const B = { teal: "#0099A8", tealDark: "#007A87", tealLight: "#E6F7F8", gray: "#7A7C81", grayLight: "#F4F5F6", grayDark: "#2D2E30", white: "#FFF", red: "#D94F4F", green: "#2A9D5C", amber: "#E5A100", bg: "#F8F9FB" };
 
 const MODULES = [
@@ -35,69 +28,28 @@ const MODULES = [
   ]},
 ];
 
-// ── Styles (same as prototype) ─────────────────────────────────
-const S = {
-  app: { display: "flex", height: "100vh", fontFamily: "'DM Sans', 'Segoe UI', sans-serif", background: B.bg, color: B.grayDark, overflow: "hidden" },
-  sidebar: { width: 280, background: B.grayDark, color: B.white, display: "flex", flexDirection: "column", flexShrink: 0, overflowY: "auto" },
-  sidebarHeader: { padding: "24px 20px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)" },
-  logo: { fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", color: B.teal },
-  logoSub: { fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, letterSpacing: "0.06em", textTransform: "uppercase" },
-  catLabel: { fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)", padding: "20px 20px 8px", display: "flex", alignItems: "center", gap: 6 },
-  navItem: (a) => ({ padding: "10px 20px", fontSize: 13, cursor: "pointer", background: a ? "rgba(0,153,168,0.15)" : "transparent", color: a ? B.teal : "rgba(255,255,255,0.6)", borderLeft: a ? `3px solid ${B.teal}` : "3px solid transparent", transition: "all 0.15s", fontWeight: a ? 600 : 400 }),
-  main: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
-  header: { padding: "20px 32px", borderBottom: `1px solid ${B.grayLight}`, background: B.white, display: "flex", alignItems: "center", justifyContent: "space-between" },
-  content: { flex: 1, overflowY: "auto", padding: 32 },
-  card: { background: B.white, borderRadius: 10, border: `1px solid ${B.grayLight}`, padding: 24, marginBottom: 20, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" },
-  uploadZone: (d) => ({ border: `2px dashed ${d ? B.teal : "#D1D5DB"}`, borderRadius: 8, padding: "28px 16px", textAlign: "center", cursor: "pointer", background: d ? B.tealLight : "#FAFBFC", transition: "all 0.15s" }),
-  uploadedFile: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: B.tealLight, borderRadius: 6, fontSize: 12, color: B.tealDark, fontWeight: 500, marginTop: 8 },
-  paramRow: { display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 },
-  paramGroup: { display: "flex", flexDirection: "column", gap: 4, flex: "1 1 200px" },
-  paramLabel: { fontSize: 11, fontWeight: 600, color: B.gray, textTransform: "uppercase", letterSpacing: "0.05em" },
-  paramInput: { padding: "8px 12px", border: "1px solid #D1D5DB", borderRadius: 6, fontSize: 13, outline: "none", fontFamily: "inherit" },
-  btn: (v = "primary", dis = false) => ({
-    padding: "10px 24px", borderRadius: 8, border: "none", fontWeight: 600, fontSize: 13, cursor: dis ? "not-allowed" : "pointer",
-    fontFamily: "inherit", transition: "all 0.15s", opacity: dis ? 0.5 : 1,
-    ...(v === "primary" ? { background: B.teal, color: B.white } : { background: B.grayLight, color: B.grayDark }),
-  }),
-  summaryGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 20 },
-  summaryCard: (c) => ({ padding: "16px 20px", borderRadius: 8, background: c === "green" ? "#F0FAF4" : c === "red" ? "#FEF2F2" : c === "amber" ? "#FFFBEB" : B.tealLight, borderLeft: `4px solid ${c === "green" ? B.green : c === "red" ? B.red : c === "amber" ? B.amber : B.teal}` }),
-  table: { width: "100%", borderCollapse: "collapse", fontSize: 12 },
-  th: { textAlign: "left", padding: "10px 12px", borderBottom: `2px solid ${B.grayLight}`, fontWeight: 600, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em", color: B.gray },
-  td: { padding: "9px 12px", borderBottom: `1px solid ${B.grayLight}`, color: B.grayDark },
-  tab: (a) => ({ padding: "8px 16px", fontSize: 12, fontWeight: a ? 600 : 400, color: a ? B.teal : B.gray, cursor: "pointer", background: "none", border: "none", borderBottom: `2px solid ${a ? B.teal : "transparent"}`, fontFamily: "inherit" }),
-  badge: (t) => ({ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 10, fontWeight: 600,
-    background: ["HIGH","DETERIORATING","OFF_TRACK"].includes(t) ? "#FEE2E2" : ["MEDIUM","AT_RISK"].includes(t) ? "#FEF3C7" : "#D1FAE5",
-    color: ["HIGH","DETERIORATING","OFF_TRACK"].includes(t) ? B.red : ["MEDIUM","AT_RISK"].includes(t) ? "#92400E" : B.green }),
-  spinner: { display: "inline-block", width: 16, height: 16, border: "2px solid rgba(255,255,255,0.3)", borderTopColor: B.white, borderRadius: "50%", animation: "spin 0.6s linear infinite" },
-};
-
-// ── Reusable Components ────────────────────────────────────────
 function FileUpload({ label, onFile, file, onRawFile }) {
   const [dragging, setDragging] = useState(false);
   const ref = useRef();
-
   const handleFile = useCallback((f) => {
     if (!f) return;
-    onRawFile(f); // store raw File for upload
-    Papa.parse(f, {
-      header: true, skipEmptyLines: true,
-      complete: (r) => onFile({ name: f.name, data: r.data, fields: r.meta.fields }),
-    });
+    onRawFile(f);
+    Papa.parse(f, { header: true, skipEmptyLines: true, complete: (r) => onFile({ name: f.name, data: r.data, fields: r.meta.fields }) });
   }, [onFile, onRawFile]);
 
   return (
     <div>
-      <div style={S.uploadZone(dragging)} onClick={() => ref.current?.click()}
+      <div className="upload-zone" data-dragging={dragging} onClick={() => ref.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
         onDrop={(e) => { e.preventDefault(); setDragging(false); handleFile(e.dataTransfer.files[0]); }}>
         <div style={{ fontSize: 24, marginBottom: 4 }}>📎</div>
         <div style={{ fontSize: 13, fontWeight: 600, color: B.grayDark }}>{label}</div>
-        <div style={{ fontSize: 13, color: B.gray, marginTop: 4 }}>Drop CSV here or click to browse</div>
+        <div style={{ fontSize: 12, color: B.gray, marginTop: 4 }}>Drop CSV here or tap to browse</div>
         <input ref={ref} type="file" accept=".csv,.tsv" style={{ display: "none" }} onChange={(e) => handleFile(e.target.files[0])} />
       </div>
       {file && (
-        <div style={S.uploadedFile}>
+        <div className="uploaded-file">
           <span>✓ {file.name} ({file.data?.length || 0} rows)</span>
           <span style={{ cursor: "pointer", opacity: 0.6 }} onClick={() => { onFile(null); onRawFile(null); }}>✕</span>
         </div>
@@ -108,10 +60,10 @@ function FileUpload({ label, onFile, file, onRawFile }) {
 
 function SummaryCards({ items }) {
   if (!items?.length) return null;
-  return <div style={S.summaryGrid}>{items.map((it, i) => (
-    <div key={i} style={S.summaryCard(it.color)}>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{typeof it.value === "number" ? it.value.toLocaleString() : it.value}</div>
-      <div style={{ fontSize: 11, color: B.gray, marginTop: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{it.label}</div>
+  return <div className="summary-grid">{items.map((it, i) => (
+    <div key={i} className={`summary-card summary-card-${it.color}`}>
+      <div className="summary-value">{typeof it.value === "number" ? it.value.toLocaleString() : it.value}</div>
+      <div className="summary-label">{it.label}</div>
     </div>
   ))}</div>;
 }
@@ -120,13 +72,13 @@ function DataTable({ data, maxRows = 50 }) {
   if (!data?.length) return <div style={{ fontSize: 13, color: B.gray, padding: 16 }}>No items.</div>;
   const keys = Object.keys(data[0]);
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table style={S.table}>
-        <thead><tr>{keys.map(k => <th key={k} style={S.th}>{k.replace(/_/g, " ")}</th>)}</tr></thead>
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead><tr>{keys.map(k => <th key={k}>{k.replace(/_/g, " ")}</th>)}</tr></thead>
         <tbody>{data.slice(0, maxRows).map((row, i) => (
-          <tr key={i} style={{ background: i % 2 === 0 ? B.white : "#FAFBFC" }}>
-            {keys.map(k => <td key={k} style={S.td}>
-              {["materiality","risk","status","trend"].includes(k) ? <span style={S.badge(row[k])}>{row[k]}</span> : typeof row[k] === "number" ? row[k].toLocaleString() : String(row[k] ?? "")}
+          <tr key={i} className={i % 2 === 0 ? "" : "alt"}>
+            {keys.map(k => <td key={k}>
+              {["materiality","risk","status","trend"].includes(k) ? <span className={`badge badge-${(row[k]||"").toLowerCase()}`}>{row[k]}</span> : typeof row[k] === "number" ? row[k].toLocaleString() : String(row[k] ?? "")}
             </td>)}
           </tr>
         ))}</tbody>
@@ -140,90 +92,79 @@ function TabbedTables({ tabs }) {
   if (!tabs?.length) return null;
   return (
     <div>
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${B.grayLight}`, marginBottom: 12 }}>
-        {tabs.map((t, i) => <button key={i} style={S.tab(i === active)} onClick={() => setActive(i)}>{t.label} {t.data?.length ? `(${t.data.length})` : ""}</button>)}
+      <div className="tabs-bar">
+        {tabs.map((t, i) => <button key={i} className={`tab ${i === active ? "active" : ""}`} onClick={() => setActive(i)}>{t.label} {t.data?.length ? `(${t.data.length})` : ""}</button>)}
       </div>
       <DataTable data={tabs[active]?.data || []} />
     </div>
   );
 }
 
-// ── Result Renderer ────────────────────────────────────────────
 function renderResults(id, d) {
   if (!d) return null;
-  const renderers = {
+  const R = {
     bank_recon: () => <>
-      <SummaryCards items={[{ label: "Matched", value: d.summary?.total_matched||0, color: "green" },{ label: "Bank Only", value: d.bank_only?.length||0, color: "amber" },{ label: "GL Only", value: d.gl_only?.length||0, color: "amber" },{ label: "Net Diff", value: `SAR ${(d.summary?.net_difference||0).toLocaleString()}`, color: d.summary?.net_difference===0?"green":"red" }]} />
+      <SummaryCards items={[{ label:"Matched",value:d.summary?.total_matched||0,color:"green" },{ label:"Bank Only",value:d.summary?.total_bank_only||0,color:"amber" },{ label:"GL Only",value:d.summary?.total_gl_only||0,color:"amber" },{ label:"Net Diff",value:`SAR ${(d.summary?.net_difference||0).toLocaleString()}`,color:d.summary?.net_difference===0?"green":"red" }]} />
       <TabbedTables tabs={[{ label:"Matched",data:d.matched },{ label:"Bank Only",data:d.bank_only },{ label:"GL Only",data:d.gl_only },{ label:"Mismatches",data:d.mismatches }]} />
     </>,
     intercompany: () => <>
       <SummaryCards items={[{ label:"Matched",value:d.summary?.total_matched||0,color:"green" },{ label:"FX Diff",value:d.summary?.total_fx||0,color:"amber" },{ label:"Timing",value:d.summary?.total_timing||0,color:"amber" },{ label:"Investigate",value:d.summary?.total_investigate||0,color:"red" }]} />
-      <TabbedTables tabs={[{ label:"Matched",data:d.matched },{ label:"FX Differences",data:d.fx_differences },{ label:"Timing",data:d.timing_differences },{ label:"Investigation",data:d.investigation_required }]} />
+      <TabbedTables tabs={[{ label:"Matched",data:d.matched },{ label:"FX",data:d.fx_differences },{ label:"Timing",data:d.timing_differences },{ label:"Investigation",data:d.investigation_required }]} />
     </>,
     gl_recon: () => <>
       <SummaryCards items={[{ label:"Reviewed",value:d.summary?.total_accounts_reviewed||0,color:"teal" },{ label:"Flags",value:d.summary?.flags_raised||0,color:"amber" },{ label:"Critical",value:d.summary?.critical_flags||0,color:"red" }]} />
-      <TabbedTables tabs={[{ label:"Unusual Movements",data:d.unusual_movements },{ label:"Nature Issues",data:d.nature_inconsistencies }]} />
+      <TabbedTables tabs={[{ label:"Unusual",data:d.unusual_movements },{ label:"Nature Issues",data:d.nature_inconsistencies }]} />
     </>,
     variance: () => <>
-      <SummaryCards items={[{ label:"Favorable",value:`SAR ${(d.summary?.total_favorable||0).toLocaleString()}`,color:"green" },{ label:"Unfavorable",value:`SAR ${(d.summary?.total_unfavorable||0).toLocaleString()}`,color:"red" },{ label:"Items Flagged",value:d.summary?.items_flagged||0,color:"teal" }]} />
+      <SummaryCards items={[{ label:"Favorable",value:`SAR ${(d.summary?.total_favorable||0).toLocaleString()}`,color:"green" },{ label:"Unfavorable",value:`SAR ${(d.summary?.total_unfavorable||0).toLocaleString()}`,color:"red" },{ label:"Flagged",value:d.summary?.items_flagged||0,color:"teal" }]} />
       <DataTable data={d.variances} />
     </>,
     anomaly: () => <>
-      <SummaryCards items={[{ label:"Total Flags",value:d.summary?.total_flags||0,color:"red" },{ label:"High Risk",value:d.summary?.high_risk||0,color:"red" },{ label:"Medium",value:d.summary?.medium_risk||0,color:"amber" },{ label:"Low",value:d.summary?.low_risk||0,color:"green" }]} />
-      <TabbedTables tabs={[{ label:"Duplicates",data:d.duplicates },{ label:"Round Numbers",data:d.round_numbers },{ label:"After Hours",data:d.after_hours },{ label:"Threshold Gaming",data:d.threshold_gaming }]} />
+      <SummaryCards items={[{ label:"Total Flags",value:d.summary?.total_flags||0,color:"red" },{ label:"High",value:d.summary?.high_risk||0,color:"red" },{ label:"Medium",value:d.summary?.medium_risk||0,color:"amber" },{ label:"Low",value:d.summary?.low_risk||0,color:"green" }]} />
+      <TabbedTables tabs={[{ label:"Duplicates",data:d.duplicates },{ label:"Round Numbers",data:d.round_numbers },{ label:"After Hours",data:d.after_hours },{ label:"Threshold",data:d.threshold_gaming }]} />
     </>,
     ar_aging: () => <>
       <SummaryCards items={[{ label:"Total AR",value:`SAR ${(d.summary?.total_ar||0).toLocaleString()}`,color:"teal" },{ label:"Overdue",value:`${d.summary?.overdue_pct||0}%`,color:"amber" },{ label:"Deteriorating",value:d.summary?.customers_deteriorating||0,color:"red" }]} />
-      <TabbedTables tabs={[{ label:"Behavior Shifts",data:d.behavior_shifts },{ label:"Abnormal Growth",data:d.abnormal_growth },{ label:"Concentration",data:d.concentration_risk }]} />
+      <TabbedTables tabs={[{ label:"Shifts",data:d.behavior_shifts },{ label:"Growth",data:d.abnormal_growth },{ label:"Concentration",data:d.concentration_risk }]} />
     </>,
-    commentary: () => <>
-      <div style={S.card}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>📄 Management Commentary</div>
-        <p style={{ fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>{d.commentary?.performance_summary}</p>
-        <p style={{ fontSize: 13.5, lineHeight: 1.7, marginBottom: 12 }}>{d.commentary?.key_drivers}</p>
-        <p style={{ fontSize: 13.5, lineHeight: 1.7 }}>{d.commentary?.outlook}</p>
-      </div>
-    </>,
+    commentary: () => <div className="card"><div className="card-title">📄 Management Commentary</div>
+      <p className="prose">{d.commentary?.performance_summary}</p><hr className="divider" />
+      <p className="prose">{d.commentary?.key_drivers}</p><hr className="divider" />
+      <p className="prose">{d.commentary?.outlook}</p></div>,
     exec_summary: () => <>
-      <div style={S.card}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>📋 Executive Summary</div>
-        <p style={{ fontSize: 13.5, lineHeight: 1.7 }}>{d.executive_summary}</p>
-      </div>
-      {d.risk_highlights?.length > 0 && <div style={S.card}><div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>🔴 Risks</div>{d.risk_highlights.map((r,i)=><div key={i} style={{ fontSize: 13, padding: "3px 0" }}>• {r}</div>)}</div>}
+      <div className="card"><div className="card-title">📋 Executive Summary</div><p className="prose">{d.executive_summary}</p></div>
+      {d.risk_highlights?.length > 0 && <div className="card"><div className="card-title">🔴 Risks</div>{d.risk_highlights.map((r,i)=><div key={i} style={{ fontSize: 13, padding: "3px 0" }}>• {r}</div>)}</div>}
     </>,
-    board_kpi: () => (d.kpis||[]).map((k,i)=><div key={i} style={{...S.card, borderLeft:`4px solid ${k.status==="ON_TRACK"?B.green:k.status==="AT_RISK"?B.amber:B.red}`}}>
-      <div style={{ display:"flex",justifyContent:"space-between",marginBottom:8 }}><span style={{ fontSize:15,fontWeight:700 }}>{k.kpi_name}</span><span style={S.badge(k.status)}>{k.status?.replace("_"," ")}</span></div>
-      <p style={{ fontSize:13, lineHeight:1.6 }}>{k.commentary}</p>
-    </div>),
+    board_kpi: () => (d.kpis||[]).map((k,i)=><div key={i} className={`card kpi-card kpi-${(k.status||"").toLowerCase().replace("_","")}`}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:8 }}><span style={{ fontSize:15,fontWeight:700 }}>{k.kpi_name}</span><span className={`badge badge-${(k.status||"").toLowerCase()}`}>{k.status?.replace("_"," ")}</span></div>
+      <p className="prose">{k.commentary}</p></div>),
     journal_entries: () => <>
       <SummaryCards items={[{ label:"Entries",value:d.summary?.total_entries||0,color:"teal" },{ label:"Total Debits",value:`SAR ${(d.summary?.total_debits||0).toLocaleString()}`,color:"teal" },{ label:"Balanced",value:d.summary?.balanced?"Yes ✓":"No ✗",color:d.summary?.balanced?"green":"red" }]} />
-      <DataTable data={d.journal_entries} />
-    </>,
+      <DataTable data={d.journal_entries} /></>,
     data_cleansing: () => <>
       <SummaryCards items={[{ label:"Issues",value:d.summary?.total_issues||0,color:"amber" },{ label:"Duplicates",value:d.summary?.duplicates_found||0,color:"red" },{ label:"Names Fixed",value:d.summary?.names_standardized||0,color:"teal" }]} />
-      <TabbedTables tabs={[{ label:"Issues",data:d.issues_found },{ label:"Name Fixes",data:d.name_standardizations }]} />
-    </>,
+      <TabbedTables tabs={[{ label:"Issues",data:d.issues_found },{ label:"Names",data:d.name_standardizations }]} /></>,
     report_template: () => <div>
       <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>{d.template?.title}</div>
-      {(d.template?.sections||[]).map((sec,i)=><div key={i} style={{...S.card,borderLeft:`4px solid ${B.teal}`}}>
+      {(d.template?.sections||[]).map((sec,i)=><div key={i} className="card" style={{ borderLeft:`4px solid ${B.teal}` }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8, color: B.tealDark }}>{sec.section}</div>
         {(sec.subsections||[]).map((sub,j)=><div key={j} style={{ marginBottom: 10 }}><div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{sub.name}</div>
-          {(sub.line_items||[]).map((li,k)=><div key={k} style={{ fontSize: 12, color: B.gray, padding:"2px 0 2px 12px", borderLeft:`2px solid ${B.grayLight}` }}><strong>{li.item}</strong> — {li.description}</div>)}
-        </div>)}
-      </div>)}
+          {(sub.line_items||[]).map((li,k)=><div key={k} style={{ fontSize: 12, color: B.gray, padding:"2px 0 2px 12px", borderLeft:`2px solid ${B.grayLight}` }}><strong>{li.item}</strong> — {li.description}</div>)}</div>)}</div>)}
     </div>,
   };
-  return (renderers[id] || (() => <pre style={{ fontSize: 12, background: "#F9FAFB", padding: 16, borderRadius: 8, overflow: "auto" }}>{JSON.stringify(d, null, 2)}</pre>))();
+  return (R[id] || (() => <pre style={{ fontSize: 12, background:"#F9FAFB", padding:16, borderRadius:8, overflow:"auto", whiteSpace:"pre-wrap" }}>{JSON.stringify(d,null,2)}</pre>))();
 }
 
-// ── Main App ───────────────────────────────────────────────────
 export default function App() {
   const [activeModule, setActiveModule] = useState(null);
   const [files, setFiles] = useState({});
-  const [rawFiles, setRawFiles] = useState({}); // actual File objects for upload
+  const [rawFiles, setRawFiles] = useState({});
   const [params, setParams] = useState({});
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [loadingMsg, setLoadingMsg] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const module = MODULES.flatMap(c => c.items).find(m => m.id === activeModule);
   const msgs = ["Analyzing financial data...", "Cross-referencing entries...", "Identifying patterns...", "Preparing results..."];
@@ -234,91 +175,196 @@ export default function App() {
     return module.files.every((_, i) => files[`${activeModule}_${i}`]?.data?.length > 0);
   };
 
+  const selectModule = (id) => {
+    setActiveModule(id);
+    setSidebarOpen(false);
+  };
+
   const runAnalysis = async () => {
     setLoading(true); setError(null); setResults(null);
     let mi = 0;
     setLoadingMsg(msgs[0]);
     const iv = setInterval(() => { mi = (mi+1) % msgs.length; setLoadingMsg(msgs[mi]); }, 3000);
-
     try {
-      // Build FormData with files + params
       const fd = new FormData();
       fd.append("module_id", activeModule);
-
       const moduleParams = {};
-      (module?.params || []).forEach(p => {
-        moduleParams[p.key] = params[`${activeModule}_${p.key}`] ?? p.default;
-      });
+      (module?.params || []).forEach(p => { moduleParams[p.key] = params[`${activeModule}_${p.key}`] ?? p.default; });
       fd.append("params_json", JSON.stringify(moduleParams));
-
-      // Attach raw CSV files
       const f0 = rawFiles[`${activeModule}_0`];
       const f1 = rawFiles[`${activeModule}_1`];
       if (f0) fd.append("file_0", f0);
       if (f1) fd.append("file_1", f1);
-
       const resp = await fetch(`${API_BASE}/api/analyze`, { method: "POST", body: fd });
-
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.detail || `Server error: ${resp.status}`);
-      }
-
+      if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || `Server error: ${resp.status}`); }
       const data = await resp.json();
       setResults(data.results);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      clearInterval(iv); setLoading(false); setLoadingMsg("");
-    }
+    } catch (err) { setError(err.message); } finally { clearInterval(iv); setLoading(false); setLoadingMsg(""); }
   };
 
   useEffect(() => { setResults(null); setError(null); }, [activeModule]);
 
   return (
-    <div style={S.app}>
+    <div className="app">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
         @keyframes spin { to { transform: rotate(360deg) } }
         @keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        .app { display: flex; height: 100vh; height: 100dvh; font-family: 'DM Sans','Segoe UI',sans-serif; background: ${B.bg}; color: ${B.grayDark}; overflow: hidden; }
+
+        /* ── Sidebar ── */
+        .sidebar { width: 280px; background: ${B.grayDark}; color: ${B.white}; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; z-index: 100; }
+        .sidebar-header { padding: 24px 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; align-items: center; justify-content: space-between; }
+        .logo { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; color: ${B.teal}; }
+        .logo-sub { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+        .close-btn { display: none; background: none; border: none; color: rgba(255,255,255,0.5); font-size: 24px; cursor: pointer; padding: 4px 8px; }
+        .cat-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.3); padding: 20px 20px 8px; display: flex; align-items: center; gap: 6px; }
+        .nav-item { padding: 10px 20px; font-size: 13px; cursor: pointer; border-left: 3px solid transparent; transition: all 0.15s; color: rgba(255,255,255,0.6); }
+        .nav-item:hover { background: rgba(255,255,255,0.05); }
+        .nav-item.active { background: rgba(0,153,168,0.15); color: ${B.teal}; border-left-color: ${B.teal}; font-weight: 600; }
+
+        /* ── Overlay ── */
+        .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 90; }
+
+        /* ── Main ── */
+        .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+        .header { padding: 16px 24px; border-bottom: 1px solid ${B.grayLight}; background: ${B.white}; display: flex; align-items: center; gap: 12px; }
+        .hamburger { display: none; background: none; border: 1px solid ${B.grayLight}; border-radius: 6px; padding: 6px 10px; font-size: 20px; cursor: pointer; color: ${B.grayDark}; flex-shrink: 0; }
+        .header-title { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+        .header-desc { font-size: 13px; color: ${B.gray}; margin-top: 2px; }
+        .content { flex: 1; overflow-y: auto; padding: 24px; }
+
+        /* ── Cards ── */
+        .card { background: ${B.white}; border-radius: 10px; border: 1px solid ${B.grayLight}; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+        .card-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+        /* ── Upload ── */
+        .upload-zone { border: 2px dashed #D1D5DB; border-radius: 8px; padding: 24px 16px; text-align: center; cursor: pointer; background: #FAFBFC; transition: all 0.15s; }
+        .upload-zone[data-dragging="true"] { border-color: ${B.teal}; background: ${B.tealLight}; }
+        .uploaded-file { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: ${B.tealLight}; border-radius: 6px; font-size: 12px; color: ${B.tealDark}; font-weight: 500; margin-top: 8px; }
+        .file-grid { display: grid; gap: 16px; }
+        .file-grid-2 { grid-template-columns: 1fr 1fr; }
+
+        /* ── Params ── */
+        .param-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+        .param-group { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; }
+        .param-label { font-size: 11px; font-weight: 600; color: ${B.gray}; text-transform: uppercase; letter-spacing: 0.05em; }
+        .param-input { padding: 8px 12px; border: 1px solid #D1D5DB; border-radius: 6px; font-size: 13px; outline: none; font-family: inherit; width: 100%; }
+
+        /* ── Buttons ── */
+        .btn-primary { padding: 10px 24px; border-radius: 8px; border: none; font-weight: 600; font-size: 13px; cursor: pointer; font-family: inherit; transition: all 0.15s; background: ${B.teal}; color: ${B.white}; }
+        .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+        .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: ${B.white}; border-radius: 50%; animation: spin 0.6s linear infinite; }
+
+        /* ── Summary Cards ── */
+        .summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 16px; }
+        .summary-card { padding: 14px 16px; border-radius: 8px; border-left: 4px solid; }
+        .summary-card-green { background: #F0FAF4; border-left-color: ${B.green}; }
+        .summary-card-red { background: #FEF2F2; border-left-color: ${B.red}; }
+        .summary-card-amber { background: #FFFBEB; border-left-color: ${B.amber}; }
+        .summary-card-teal { background: ${B.tealLight}; border-left-color: ${B.teal}; }
+        .summary-value { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+        .summary-label { font-size: 10px; color: ${B.gray}; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+        /* ── Table ── */
+        .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 500px; }
+        .data-table th { text-align: left; padding: 10px 12px; border-bottom: 2px solid ${B.grayLight}; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: ${B.gray}; white-space: nowrap; }
+        .data-table td { padding: 9px 12px; border-bottom: 1px solid ${B.grayLight}; }
+        .data-table tr.alt { background: #FAFBFC; }
+
+        /* ── Tabs ── */
+        .tabs-bar { display: flex; gap: 2px; border-bottom: 1px solid ${B.grayLight}; margin-bottom: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .tab { padding: 8px 14px; font-size: 12px; font-weight: 400; color: ${B.gray}; cursor: pointer; background: none; border: none; border-bottom: 2px solid transparent; font-family: inherit; white-space: nowrap; }
+        .tab.active { font-weight: 600; color: ${B.teal}; border-bottom-color: ${B.teal}; }
+
+        /* ── Badges ── */
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 600; }
+        .badge-high, .badge-deteriorating, .badge-off_track { background: #FEE2E2; color: ${B.red}; }
+        .badge-medium, .badge-at_risk { background: #FEF3C7; color: #92400E; }
+        .badge-low, .badge-on_track, .badge-improving { background: #D1FAE5; color: ${B.green}; }
+
+        /* ── Misc ── */
+        .prose { font-size: 13.5px; line-height: 1.7; white-space: pre-wrap; }
+        .divider { border: none; border-top: 1px solid ${B.grayLight}; margin: 16px 0; }
+        .error-card { border-left: 4px solid ${B.red}; background: #FEF2F2; animation: fadeIn 0.3s ease; }
+        .success-card { background: #F0FAF4; border-left: 4px solid ${B.green}; padding: 12px 20px; margin-bottom: 16px; }
+        .kpi-card { border-left: 4px solid ${B.gray}; }
+        .kpi-ontrack { border-left-color: ${B.green}; }
+        .kpi-atrisk { border-left-color: ${B.amber}; }
+        .kpi-offtrack { border-left-color: ${B.red}; }
+        .welcome { text-align: center; padding: 60px 24px; max-width: 520px; margin: 0 auto; }
+        .welcome-icon { font-size: 48px; margin-bottom: 16px; }
+        .welcome-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.02em; }
+        .welcome-desc { font-size: 14px; color: ${B.gray}; line-height: 1.6; }
+        .welcome-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 32px; text-align: left; }
+        .welcome-grid .card { padding: 16px; cursor: pointer; }
+        .welcome-grid .card:hover { border-color: ${B.teal}; }
+
+        /* ── MOBILE ── */
+        @media (max-width: 768px) {
+          .sidebar { position: fixed; left: -300px; top: 0; bottom: 0; width: 280px; transition: left 0.25s ease; box-shadow: none; }
+          .sidebar.open { left: 0; box-shadow: 4px 0 20px rgba(0,0,0,0.3); }
+          .sidebar-overlay.open { display: block; }
+          .close-btn { display: block; }
+          .hamburger { display: block; }
+          .header-title { font-size: 17px; }
+          .header-desc { font-size: 12px; }
+          .content { padding: 16px; }
+          .card { padding: 16px; }
+          .file-grid-2 { grid-template-columns: 1fr; }
+          .summary-grid { grid-template-columns: repeat(2, 1fr); }
+          .summary-value { font-size: 17px; }
+          .welcome-grid { grid-template-columns: 1fr; }
+          .welcome { padding: 40px 16px; }
+          .welcome-title { font-size: 20px; }
+          .param-row { flex-direction: column; }
+        }
+
+        @media (max-width: 380px) {
+          .summary-grid { grid-template-columns: 1fr; }
+        }
       `}</style>
 
-      <div style={S.sidebar}>
-        <div style={S.sidebarHeader}>
-          <div style={S.logo}>Trustangle</div>
-          <div style={S.logoSub}>Finance AI Assistant</div>
+      {/* Sidebar overlay for mobile */}
+      <div className={`sidebar-overlay ${sidebarOpen ? "open" : ""}`} onClick={() => setSidebarOpen(false)} />
+
+      {/* Sidebar */}
+      <div className={`sidebar ${sidebarOpen ? "open" : ""}`}>
+        <div className="sidebar-header">
+          <div>
+            <div className="logo">Trustangle</div>
+            <div className="logo-sub">Finance AI Assistant</div>
+          </div>
+          <button className="close-btn" onClick={() => setSidebarOpen(false)}>✕</button>
         </div>
         {MODULES.map(cat => (
           <div key={cat.category}>
-            <div style={S.catLabel}>{cat.icon} {cat.category}</div>
+            <div className="cat-label">{cat.icon} {cat.category}</div>
             {cat.items.map(item => (
-              <div key={item.id} style={S.navItem(activeModule === item.id)} onClick={() => setActiveModule(item.id)}>
+              <div key={item.id} className={`nav-item ${activeModule === item.id ? "active" : ""}`} onClick={() => selectModule(item.id)}>
                 {item.name}
               </div>
             ))}
           </div>
         ))}
-        <div style={{ flex: 1 }} />
-        <div style={{ padding: 20, fontSize: 10, color: "rgba(255,255,255,0.2)", borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-          Powered by Claude API · v1.0
-        </div>
       </div>
 
-      <div style={S.main}>
+      {/* Main */}
+      <div className="main">
         {!module ? (
-          <div style={S.content}>
-            <div style={{ textAlign: "center", padding: "80px 40px", maxWidth: 520, margin: "0 auto" }}>
-              <div style={{ fontSize: 48, marginBottom: 16 }}>🏦</div>
-              <div style={{ fontSize: 26, fontWeight: 700, marginBottom: 8 }}>Finance AI Assistant</div>
-              <div style={{ fontSize: 14, color: B.gray, lineHeight: 1.6 }}>
-                Upload your financial data and let AI handle reconciliations, analysis, reporting, and automation.
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 32, textAlign: "left" }}>
+          <div className="content">
+            <div className="welcome">
+              <div className="welcome-icon">🏦</div>
+              <div className="welcome-title">Finance AI Assistant</div>
+              <div className="welcome-desc">Upload your financial data and let AI handle reconciliations, analysis, reporting, and automation.</div>
+              <div className="welcome-grid">
                 {MODULES.map(cat => (
-                  <div key={cat.category} style={{ ...S.card, padding: 16 }}>
+                  <div key={cat.category} className="card" onClick={() => selectModule(cat.items[0].id)}>
                     <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>{cat.icon} {cat.category}</div>
-                    {cat.items.map(item => <div key={item.id} style={{ fontSize: 12, color: B.gray, padding: "2px 0", cursor: "pointer" }} onClick={() => setActiveModule(item.id)}>→ {item.name}</div>)}
+                    {cat.items.map(item => <div key={item.id} style={{ fontSize: 12, color: B.gray, padding: "2px 0", cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); selectModule(item.id); }}>→ {item.name}</div>)}
                   </div>
                 ))}
               </div>
@@ -326,35 +372,35 @@ export default function App() {
           </div>
         ) : (
           <>
-            <div style={S.header}>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 700 }}>{module.name}</div>
-                <div style={{ fontSize: 13, color: B.gray, marginTop: 2 }}>{module.desc}</div>
+            <div className="header">
+              <button className="hamburger" onClick={() => setSidebarOpen(true)}>☰</button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="header-title">{module.name}</div>
+                <div className="header-desc">{module.desc}</div>
               </div>
             </div>
-            <div style={S.content}>
-              <div style={S.card}>
-                <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>📂 Data Input</div>
+            <div className="content">
+              <div className="card">
+                <div className="card-title">📂 Data Input</div>
                 {module.files.length > 0 ? (
-                  <div style={{ display: "grid", gridTemplateColumns: module.files.length > 1 ? "1fr 1fr" : "1fr", gap: 16 }}>
+                  <div className={`file-grid ${module.files.length > 1 ? "file-grid-2" : ""}`}>
                     {module.files.map((label, i) => (
                       <FileUpload key={i} label={label}
                         file={files[`${activeModule}_${i}`]}
                         onFile={(f) => setFiles({ ...files, [`${activeModule}_${i}`]: f })}
-                        onRawFile={(f) => setRawFiles({ ...rawFiles, [`${activeModule}_${i}`]: f })}
-                      />
+                        onRawFile={(f) => setRawFiles({ ...rawFiles, [`${activeModule}_${i}`]: f })} />
                     ))}
                   </div>
                 ) : <div style={{ fontSize: 13, color: B.gray }}>No file upload required.</div>}
 
                 {module.params.length > 0 && (
                   <div style={{ marginTop: 16 }}>
-                    <div style={{ ...S.paramLabel, marginBottom: 8 }}>Parameters</div>
-                    <div style={S.paramRow}>
+                    <div className="param-label" style={{ marginBottom: 8 }}>Parameters</div>
+                    <div className="param-row">
                       {module.params.map(p => (
-                        <div key={p.key} style={S.paramGroup}>
-                          <label style={S.paramLabel}>{p.label}</label>
-                          <input type={p.type} style={S.paramInput}
+                        <div key={p.key} className="param-group">
+                          <label className="param-label">{p.label}</label>
+                          <input type={p.type} className="param-input"
                             value={params[`${activeModule}_${p.key}`] ?? p.default}
                             onChange={e => setParams({ ...params, [`${activeModule}_${p.key}`]: p.type === "number" ? Number(e.target.value) : e.target.value })} />
                         </div>
@@ -363,22 +409,18 @@ export default function App() {
                   </div>
                 )}
 
-                <div style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center" }}>
-                  <button style={S.btn("primary", loading || !canRun())} onClick={runAnalysis} disabled={loading || !canRun()}>
-                    {loading ? <span style={{ display: "flex", alignItems: "center", gap: 8 }}><span style={S.spinner} /> Analyzing...</span> : "▶ Run Analysis"}
+                <div style={{ marginTop: 20, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                  <button className="btn-primary" onClick={runAnalysis} disabled={loading || !canRun()}>
+                    {loading ? <span style={{ display:"flex",alignItems:"center",gap:8 }}><span className="spinner" /> Analyzing...</span> : "▶ Run Analysis"}
                   </button>
                   {loading && <span style={{ fontSize: 12, color: B.gray, fontStyle: "italic" }}>{loadingMsg}</span>}
                 </div>
               </div>
 
-              {error && <div style={{ ...S.card, borderLeft: `4px solid ${B.red}`, background: "#FEF2F2", animation: "fadeIn 0.3s ease" }}>
-                <div style={{ fontSize: 13, color: B.red, fontWeight: 600 }}>Error: {error}</div>
-              </div>}
+              {error && <div className="card error-card"><div style={{ fontSize: 13, color: B.red, fontWeight: 600 }}>Error: {error}</div></div>}
 
               {results && <div style={{ animation: "fadeIn 0.4s ease" }}>
-                <div style={{ ...S.card, background: "#F0FAF4", borderLeft: `4px solid ${B.green}`, padding: "12px 20px", marginBottom: 20 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: B.green }}>✓ Analysis Complete</span>
-                </div>
+                <div className="card success-card"><span style={{ fontSize: 13, fontWeight: 600, color: B.green }}>✓ Analysis Complete</span></div>
                 {renderResults(activeModule, results)}
               </div>}
             </div>
