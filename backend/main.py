@@ -1,6 +1,5 @@
 """
 Finance AI Assistant — Backend API
-Proxies requests to Claude API with secure key management.
 """
 
 import os
@@ -9,8 +8,9 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import anthropic
 import csv
@@ -18,8 +18,7 @@ import io
 
 # ── Config ──────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
-ALLOWED_ORIGINS = ["*"]
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
 MAX_TOKENS = int(os.environ.get("MAX_TOKENS", "4096"))
 
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +26,7 @@ logger = logging.getLogger("finance-ai")
 
 app = FastAPI(title="Finance AI Assistant API", version="1.0.0")
 
+# Bulletproof CORS — allow everything
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -34,6 +34,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Catch ALL errors and return JSON with CORS headers
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
+
+# Handle CORS preflight requests explicitly
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS, PUT, DELETE",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
 
 
 # ── Helpers ─────────────────────────────────────────────────────
@@ -44,8 +72,7 @@ def get_client():
 
 
 def parse_csv_upload(content: bytes) -> dict:
-    """Parse uploaded CSV bytes into structured data."""
-    text = content.decode("utf-8-sig")  # handles BOM
+    text = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
     rows = [row for row in reader]
     fields = reader.fieldnames or []
@@ -53,7 +80,6 @@ def parse_csv_upload(content: bytes) -> dict:
 
 
 def call_claude(prompt: str, client: anthropic.Anthropic) -> dict:
-    """Call Claude and parse JSON response."""
     logger.info(f"Calling Claude ({MODEL}) — prompt length: {len(prompt)} chars")
     response = client.messages.create(
         model=MODEL,
@@ -71,8 +97,6 @@ def call_claude(prompt: str, client: anthropic.Anthropic) -> dict:
 
 
 # ── Prompt Builders ─────────────────────────────────────────────
-# (same prompt templates from the frontend, now server-side)
-
 PROMPT_BUILDERS = {}
 
 
@@ -94,7 +118,7 @@ def _(files, params):
 {json.dumps(files[1]['data'][:200], indent=2)}
 
 ## Instructions
-Match transactions between bank and GL based on amount (exact) and date (±{params.get('tolerance_days', 3)} days).
+Match transactions between bank and GL based on amount (exact) and date (plus or minus {params.get('tolerance_days', 3)} days).
 Classify each as: MATCHED, BANK_ONLY, GL_ONLY, or AMOUNT_MISMATCH.
 For unmatched items, suggest causes.
 
@@ -240,14 +264,9 @@ Respond ONLY with JSON:
 
 
 # ── API Endpoints ───────────────────────────────────────────────
-class AnalysisRequest(BaseModel):
-    module_id: str
-    params: dict = {}
-
-
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "api_key_configured": bool(ANTHROPIC_API_KEY)}
+    return {"status": "ok", "api_key_configured": bool(ANTHROPIC_API_KEY), "model": MODEL}
 
 
 @app.post("/api/analyze")
@@ -257,47 +276,52 @@ async def analyze(
     file_0: Optional[UploadFile] = File(None),
     file_1: Optional[UploadFile] = File(None),
 ):
-    """
-    Main analysis endpoint.
-    Accepts module_id, parameters (JSON string), and up to 2 CSV files.
-    """
-    client = get_client()
-    params = json.loads(params_json)
+    try:
+        client = get_client()
+        params = json.loads(params_json)
 
-    # Parse uploaded files
-    files = []
-    for f in [file_0, file_1]:
-        if f and f.filename:
-            content = await f.read()
-            parsed = parse_csv_upload(content)
-            files.append(parsed)
-        else:
-            files.append({"data": [], "fields": [], "row_count": 0})
+        files = []
+        for f in [file_0, file_1]:
+            if f and f.filename:
+                content = await f.read()
+                parsed = parse_csv_upload(content)
+                files.append(parsed)
+            else:
+                files.append({"data": [], "fields": [], "row_count": 0})
 
-    # Build prompt
-    builder = PROMPT_BUILDERS.get(module_id)
-    if not builder:
-        raise HTTPException(400, f"Unknown module: {module_id}")
+        builder = PROMPT_BUILDERS.get(module_id)
+        if not builder:
+            raise HTTPException(400, f"Unknown module: {module_id}")
 
-    prompt = builder(files, params)
+        prompt = builder(files, params)
 
-    # Log for audit trail
-    logger.info(f"Module: {module_id} | Files: {[f.filename for f in [file_0, file_1] if f and f.filename]} | Params: {params}")
+        logger.info(f"Module: {module_id} | Files: {[f.filename for f in [file_0, file_1] if f and f.filename]} | Params: {params}")
 
-    # Call Claude
-    result = call_claude(prompt, client)
+        result = call_claude(prompt, client)
 
-    return {
-        "module_id": module_id,
-        "results": result,
-        "timestamp": datetime.utcnow().isoformat(),
-        "model": MODEL,
-    }
+        return {
+            "module_id": module_id,
+            "results": result,
+            "timestamp": datetime.utcnow().isoformat(),
+            "model": MODEL,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Analysis error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"detail": str(e)},
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "*",
+                "Access-Control-Allow-Headers": "*",
+            },
+        )
 
 
 @app.get("/api/modules")
 def list_modules():
-    """Return available modules for the frontend."""
     return {
         "modules": [
             {"id": mid, "has_prompt": True}
